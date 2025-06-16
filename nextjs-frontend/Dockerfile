@@ -1,24 +1,21 @@
 FROM node:20-bookworm
-
-# Set the working directory
 WORKDIR /app
 
-# Install pnpm globally
+# 1) Install pnpm as root
 RUN npm install -g pnpm
 
-# Copy package files and install dependencies
-COPY package*.json ./
+# 2) Copy your lockfile and package.json first (for layer caching!)
+COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies as root (or myappuser, depending on your structure)
-RUN pnpm install
-
-## Switch to the non-root user
+# 3) Make /app owned by node, then switch
+RUN chown -R node:node /app
 USER node
 
-# Copy the rest of your application code
-COPY . .
+# 4) As node, install dependencies
+RUN pnpm install --frozen-lockfile
+
+# 5) Copy the rest of your code (also owned by node)
+COPY --chown=node:node . .
 
 EXPOSE 3000
-
-# Start the application
 CMD ["./start.sh"]

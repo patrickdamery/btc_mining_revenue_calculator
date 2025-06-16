@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "generate-client": "openapi-ts",
     "test": "jest",
     "coverage": "jest --coverage",
     "prettier": "prettier --write '**/*.{js,jsx,ts,tsx,json,css,html}'",
@@ -33,6 +32,7 @@
     "react-dom": "19.0.0",
     "react-hook-form": "^7.54.0",
     "react-icons": "^5.4.0",
+    "recharts": "^2.15.3",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.23.8"
