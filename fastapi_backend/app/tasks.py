@@ -74,7 +74,7 @@ async def calculate_revenue_mwh(db, data):
         share_of_revenue_usd = share_of_revenue * data["price_usd"]
         logger.info(f"block_revenue: {block_revenue}, number of asics: {number_of_asics}, total_hashrate: {total_hashrate}, share_of_hashrate: {share_of_hashrate}, share_of_revenue: {share_of_revenue}, share_of_revenue_usd: {share_of_revenue_usd}")
 
-        # write exchange_rate
+        # write mwh revenue
         await db.execute(
             insert(MWHRevenue).values(
                 block_number=data["height"],

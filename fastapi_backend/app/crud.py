@@ -2,7 +2,7 @@ from app.models import BlockData, ExchangeRate, MWHRevenue, ASIC
 from sqlalchemy import and_
 from sqlalchemy.future import select
 from datetime import timezone
-
+from uuid import UUID
 
 async def fetch_block_data_with_exchange_rate(db, timestamp_start, timestamp_end):
     stmt = (
@@ -26,6 +26,7 @@ async def fetch_block_data_with_exchange_rate(db, timestamp_start, timestamp_end
 
 
 async def fetch_mwh_revenue(db, timestamp_start, timestamp_end, asic_id):
+    asic_id = UUID(asic_id)
     asic = await db.execute(
         select(ASIC)
         .where(

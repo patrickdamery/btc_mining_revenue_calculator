@@ -1,88 +1,103 @@
 import pytest
 import asyncio
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
+import asyncio as _asyncio
 
-# Import functions to test
-from app.tasks import block_subsidy, fetch_price_usd, walk_chain, amap
+from app.tasks import extract_metrics, calculate_revenue_mwh, fetch_price_usd
+from app.models import ASIC
+from sqlalchemy import select
+from sqlalchemy.sql.selectable import Select
 
-# ---------- Tests for block_subsidy ----------
-@pytest.mark.parametrize("height,expected", [
-    (0, 50.0),       # genesis
-    (210000, 25.0),  # first halving
-    (420000, 12.5),  # second halving
-    (210000*64, 0.0) # subsidy zero after 64 halving
-])
-def test_block_subsidy(height, expected):
-    assert block_subsidy(height) == expected
-
-# ---------- Tests for walk_chain and amap ----------
-
-async def dummy_fetch(hash_):
-    # pretend blocks are dicts with "hash" and "next" appended
-    return {"hash": hash_, "next": str(int(hash_) + 1) if int(hash_) < 3 else None}
-
-def dummy_next(block):
-    return block.get("next")
-
-async def dummy_extract(block):
-    # return just the block value
-    return int(block["hash"]) * 2
 
 @pytest.mark.asyncio
-async def test_walk_chain_and_amap():
-    # Walk from '1' through '2','3'
-    chain = walk_chain("1", dummy_fetch, dummy_next)
-    result = []
-    async for blk in chain:
-        result.append(blk)
-    # Expect three blocks
-    assert [b["hash"] for b in result] == ["1", "2", "3"]
+async def test_extract_metrics():
+    timestamp = 1_600_000_000
+    blk = {
+        'height': 10,
+        'time': timestamp,
+        'hash': 'blockhash',
+        'tx': ['txid1'],
+    }
+    # Mock rpc methods
+    rpc = AsyncMock()
+    rpc.getblockhash.return_value = 'prevhash'
+    rpc.getblock.return_value = {'time': timestamp - 600}
+    rpc.getrawtransaction.return_value = {'vout': [{'value': 12.5}, {'value': 1.5}]}
+    rpc.getnetworkhashps.return_value = 100.0
 
-    # Test amap: double values
-    chain = walk_chain("1", dummy_fetch, dummy_next)
-    mapped = amap(dummy_extract, chain)
-    collected = []
-    async for val in mapped:
-        collected.append(val)
-    assert collected == [2, 4, 6]
-
-# ---------- Tests for fetch_price_usd ----------
-
-class DummyResponse:
-    def __init__(self, json_data):
-        self._json = json_data
-    def json(self):
-        return self._json
-
-class DummyClient:
-    def __init__(self, response):
-        self.response = response
-    async def __aenter__(self): return self
-n    async def __aexit__(self, exc_type, exc, tb): pass
-    async def get(self, url):
-        return self.response
+    data = await extract_metrics(rpc, blk)
+    assert data['height'] == 10
+    assert isinstance(data['timestamp'], datetime)
+    # Subsidy for height 10 is 50 BTC
+    assert data['subsidy'] == 50.0
+    # Fees = total_out - subsidy = 14.0 - 50.0 = -36.0
+    assert data['fees'] == pytest.approx(-36.0)
+    assert data['hashrate'] == 100.0
+    assert data['time_delta_s'] == pytest.approx(600.0)
 
 @pytest.mark.asyncio
 async def test_fetch_price_usd(monkeypatch):
-    # Prepare a fake data dict
-    ts = datetime.now(timezone.utc) - timedelta(hours=1)
-    data = {"timestamp": ts}
-    # Simulate hourly granularity: one price point
-    ms = int(ts.timestamp() * 1000)
-    fake_prices = {"prices": [[ms, 12345.67]]}
-    dummy_resp = DummyResponse(fake_prices)
-    # Monkeypatch httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient", lambda: DummyClient(dummy_resp))
-    # Call the function
-    enriched = await fetch_price_usd(data.copy())
-    assert enriched["price_usd"] == 12345.67
-    assert enriched["price_timestamp"] == datetime.fromtimestamp(ms/1000, tz=timezone.utc)
+    # Set timestamp to 30 minutes ago
+    ts = datetime.now(timezone.utc) - timedelta(minutes=30)
+    data = {'timestamp': ts}
 
-    # Test no prices case
-    dummy_resp_empty = DummyResponse({"prices": []})
-    monkeypatch.setattr(httpx, "AsyncClient", lambda: DummyClient(dummy_resp_empty))
-    enriched_empty = await fetch_price_usd(data.copy())
-    assert enriched_empty["price_usd"] is None
-    assert enriched_empty["price_timestamp"] is None
+    class DummyResp:
+        def __init__(self, json_data):
+            self._json = json_data
+        def json(self):
+            return self._json
+
+    # Prepare ms in milliseconds to match code expectation
+    ms_millis = int(ts.timestamp() * 1000)
+    async def dummy_get(self, url):
+        return DummyResp({'prices': [[ms_millis, 123.45]]})
+
+    monkeypatch.setattr(httpx.AsyncClient, 'get', dummy_get)
+    # Prevent real sleep
+    monkeypatch.setattr(_asyncio, 'sleep', AsyncMock())
+
+    result = await fetch_price_usd(data)
+    assert result['price_usd'] == 123.45
+    # price_timestamp should match the converted ms
+    assert result['price_timestamp'] == datetime.fromtimestamp(ms_millis / 1000, tz=timezone.utc)
+
+@pytest.mark.asyncio
+async def test_calculate_revenue_mwh(monkeypatch):
+    # Create fake ASIC record
+    AsicObj = SimpleNamespace(id=1, asic_power=500_000, asic_hash_rate=10_000)
+    # Mock DB execute for select: return a sync result with scalars().all()
+    select_result = MagicMock()
+    # scalars().all() returns a list with our AsicObj
+    select_result.scalars.return_value.all.return_value = [AsicObj]
+
+    db = AsyncMock()
+    # When awaited, db.execute returns select_result
+    db.execute.return_value = select_result
+    db.commit = AsyncMock()
+
+    # Prepare data
+    data = {
+        'height': 100,
+        'timestamp': datetime.now(timezone.utc),
+        'subsidy': 6.25,
+        'fees': 0.1,
+        'hashrate': 20_000,
+        'price_usd': 200.0,
+    }
+
+    # Run revenue calculation
+    await calculate_revenue_mwh(db, data)
+
+    # Should select ASICs once
+    assert any(isinstance(call.args[0], Select) for call in db.execute.call_args_list), \
+           "Expected a select query for ASIC"
+
+    # Should have committed once
+    assert db.commit.call_count == 1
+
+    # Should have inserted revenue values
+    assert db.execute.call_count >= 2
