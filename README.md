@@ -18,6 +18,13 @@ Frontend:
 
 ## Get Started
 
+### Requirements
+ - `docker`
+ - `docker compose`
+ - `make`
+
+ ### Setup
+
 In order to run this project you need to have a Bitcoin node with the RPC server enabled. The RPC server must accept connections from within the Docker container (Only accepts localhost by default). In order to enable this you must update your bitcoin.conf file so it includes the following lines:
 
 ```
