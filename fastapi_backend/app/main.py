@@ -12,6 +12,7 @@ from app.config import settings
 app = FastAPI(
     generate_unique_id_function=simple_generate_unique_route_id,
     openapi_url=settings.OPENAPI_URL,
+    root_path="/api"
 )
 
 @app.on_event("startup")

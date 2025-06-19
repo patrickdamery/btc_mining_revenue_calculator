@@ -15,6 +15,7 @@ all:
 	$(DOCKER_COMPOSE) up -d celery_worker
 	$(DOCKER_COMPOSE) build frontend --no-cache
 	$(DOCKER_COMPOSE) up -d frontend
+	$(DOCKER_COMPOSE) up -d proxy
 
 
 clean:
