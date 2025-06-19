@@ -31,8 +31,7 @@ async def extract_metrics(rpc, blk):
     sub = block_subsidy(h)
 
     # Get previous block so we can calculate the time delta.
-    prev_hash = await rpc.getblockhash(h - 1)
-    prev_blk = await rpc.getblock(prev_hash, 1)
+    prev_blk = await rpc.getblock(blk["prevblockhash"], 1)
     prev_blk_ts = datetime.fromtimestamp(prev_blk["time"], tz=timezone.utc)
     time_delta = ts - prev_blk_ts
 
